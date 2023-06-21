@@ -13,6 +13,8 @@ from mmcv import Config, DictAction
 from mmcv.runner import get_dist_info, init_dist, set_random_seed
 from mmcv.utils import get_git_hash
 
+import sys
+sys.path.append("/home/nyh/PycharmProjects/pythonProject1/multiview_pose/")
 from multiview_pose import __version__
 from mmpose.apis import init_random_seed, train_model
 from multiview_pose.datasets import build_dataset

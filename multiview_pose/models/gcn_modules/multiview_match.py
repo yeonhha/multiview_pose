@@ -257,8 +257,10 @@ class MultiViewMatchModule(nn.Module):
                              stereo_reconstructions=stereo_reconstructions,  # num_pairs x batch_size * E x 3
                              monocular_geometries=monocular_geometries)  # num_cameras x batch_size*num_persons
         coarse_candidates, pixel_ray_candidates = self.get_coarse_candidates(match_results)
+        all_coarse_candidates, all_pixel_ray_candidates = self.get_all_candidates(match_results)
         center_candidates = self.generate_center_candidates(coarse_candidates, pixel_ray_candidates)
-        return center_candidates
+        all_center_candidates = self.generate_center_candidates(all_coarse_candidates, all_pixel_ray_candidates)
+        return all_center_candidates
 
     def get_coarse_candidates(self, match_results):
         batch_size = match_results['batch_size']
@@ -300,6 +302,7 @@ class MultiViewMatchModule(nn.Module):
             pixel_ray_candidates.append(pixel_rays_i[unmatched_nodes_i])
 
         return coarse_candidates, pixel_ray_candidates
+        
 
     def generate_center_candidates(self, coarse_candidates, pixel_ray_candidates):
         center_candidates = []
@@ -328,3 +331,46 @@ class MultiViewMatchModule(nn.Module):
             center_candidates.append(samples_to_query)
 
         return center_candidates
+    
+
+    def get_all_candidates(self, match_results):
+        batch_size = match_results['batch_size']
+        num_pairs = len(self.camera_pairs)
+        edge_preds = match_results['edge_preds'].view(num_pairs, batch_size, -1)  # num_pairs * batch_size * E
+        edge_valid = match_results['edge_valid'].view(num_pairs, batch_size, -1)
+        node_valid = match_results['node_valid']
+        edge_indices = match_results['edge_indices'].view(num_pairs, batch_size, -1, 2)
+        stereo_reconstructions = match_results['stereo_reconstructions'].view(num_pairs, batch_size, -1, 3)
+        monocular_geometries = match_results['monocular_geometries']
+        camera_centers = torch.stack([mono_geo.camera_center.T
+                                      for mono_geo in monocular_geometries], dim=0)  # num_cameras x 1 x 3
+        ray_directions = torch.stack([mono_geo.ray_direction.T.view(batch_size, -1, 3)
+                                      for mono_geo in monocular_geometries], dim=0)
+        # num_cameras x batch_size x num_persons x 3
+
+        coarse_candidates = []
+        pixel_ray_candidates = []
+        unmatched_nodes = node_valid.view(-1)
+        for i in range(batch_size):
+            edge_preds_i = edge_preds[:, i].contiguous().view(-1)
+            edge_valid_i = edge_valid[:, i].contiguous().view(-1)
+            edge_indices_i = edge_indices[:, i].contiguous().view(-1, 2)
+            src_indices, tar_indices = edge_indices_i[:, 0], edge_indices_i[:, 1]
+            matched = edge_valid_i * (edge_preds_i > self.match_threshold)
+
+            unmatched_nodes[src_indices[matched]] = 0
+            unmatched_nodes[tar_indices[matched]] = 0
+
+            unmatched_nodes_i = unmatched_nodes.view(batch_size, -1)[i]
+
+            reconstructions_i = stereo_reconstructions[:, i].contiguous().view(-1, 3)
+            ray_directions_i = ray_directions[:, i]
+            camera_centers_i = torch.zeros_like(ray_directions_i) + camera_centers
+            pixel_rays_i = torch.cat([camera_centers_i,
+                                      ray_directions_i], dim=-1).view(-1, 6)
+
+            coarse_candidates.append(reconstructions_i)
+            pixel_ray_candidates.append(pixel_rays_i)
+
+        return coarse_candidates, pixel_ray_candidates
+

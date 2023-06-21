@@ -185,25 +185,25 @@ class CenterRefinementModule(nn.Module):
                 center_candidates_valid[b][0] = 1
 
         # refine
-        for i in range(len(self.cfg_3d['search_radiance'])):
-            queries = getattr(self, f'queries_{i}')
-            num_queries = queries.shape[0]
-            center_candidates_i = [self.generate_sub_samples(
-                center_candidates[b][center_candidates_valid[b], :3],
-                queries)
-                for b in range(batch_size)]
-            center_scores_i, _ = self.inference(feature_maps, img_metas, center_candidates_i, False)
-            cnt = 0
-            for b in range(batch_size):
-                num_candidates = center_candidates_valid[b].sum()
-                center_scores_i_b = center_scores_i[
-                                    cnt:cnt + num_candidates * num_queries].view(-1, num_queries)
-                candidates_scores_i_b, candidates_refined_i_b = center_scores_i_b.max(-1)
-                cnt = cnt + num_candidates * num_queries
-                center_candidates_i_b = center_candidates_i[b].view(-1, num_queries, 3)
-                center_candidates[b][center_candidates_valid[b], :3] = \
-                    center_candidates_i_b[range(num_candidates), candidates_refined_i_b]
-                center_candidates[b][center_candidates_valid[b], 4] = candidates_scores_i_b
+        # for i in range(len(self.cfg_3d['search_radiance'])):
+        #     queries = getattr(self, f'queries_{i}')
+        #     num_queries = queries.shape[0]
+        #     center_candidates_i = [self.generate_sub_samples(
+        #         center_candidates[b][center_candidates_valid[b], :3],
+        #         queries)
+        #         for b in range(batch_size)]
+        #     center_scores_i, _ = self.inference(feature_maps, img_metas, center_candidates_i, False)
+        #     cnt = 0
+        #     for b in range(batch_size):
+        #         num_candidates = center_candidates_valid[b].sum()
+        #         center_scores_i_b = center_scores_i[
+        #                             cnt:cnt + num_candidates * num_queries].view(-1, num_queries)
+        #         candidates_scores_i_b, candidates_refined_i_b = center_scores_i_b.max(-1)
+        #         cnt = cnt + num_candidates * num_queries
+        #         center_candidates_i_b = center_candidates_i[b].view(-1, num_queries, 3)
+        #         center_candidates[b][center_candidates_valid[b], :3] = \
+        #             center_candidates_i_b[range(num_candidates), candidates_refined_i_b]
+        #         center_candidates[b][center_candidates_valid[b], 4] = candidates_scores_i_b
 
         return center_candidates
 

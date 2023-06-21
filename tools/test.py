@@ -12,6 +12,8 @@ from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import get_dist_info, init_dist, load_checkpoint
 
 from mmpose.apis import multi_gpu_test, single_gpu_test
+import sys
+sys.path.append("/home/nyh/PycharmProjects/pythonProject1/multiview_pose/")
 from multiview_pose.datasets import build_dataloader, build_dataset
 from multiview_pose.models import build_posenet
 from mmpose.utils import setup_multi_processes

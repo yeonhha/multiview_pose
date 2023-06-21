@@ -1,7 +1,74 @@
 import torch
 from mmpose.models.builder import POSENETS
 from mmpose.models.detectors import DetectAndRegress
+from mmpose.core import imshow_keypoints, imshow_multiview_keypoints_3d
 from multiview_pose.models.gcn_modules import GCNS
+import mmcv
+import os
+from mmpose.datasets.dataset_info import DatasetInfo
+from mmcv import Config
+from matplotlib import pyplot as plt
+import numpy as np
+
+def imshow_multiview_joints_3d(
+    pose_result,
+    skeleton=None,
+    pose_kpt_color=None,
+    pose_link_color=None,
+    space_size=[8000, 8000, 2000],
+    space_center=[0, -500, 800],
+    kpt_score_thr=0.0,
+):
+    """Draw 3D keypoints and links in 3D coordinates.
+
+    Args:
+        pose_result (list[kpts]): The poses to draw. Each element kpts is
+            a set of K keypoints as an Kx4 numpy.ndarray, where each
+            keypoint is represented as x, y, z, score.
+        skeleton (list of [idx_i,idx_j]): Skeleton described by a list of
+            links, each is a pair of joint indices.
+        pose_kpt_color (np.ndarray[Nx3]`): Color of N keypoints. If None, do
+            not nddraw keypoints.
+        pose_link_color (np.array[Mx3]): Color of M links. If None, do not
+            draw links.
+        space_size: (list). Default: [8000, 8000, 2000].
+        space_center: (list). Default: [0, -500, 800].
+        kpt_score_thr (float): Minimum score of keypoints to be shown.
+            Default: 0.0.
+    """
+    fig = plt.figure()
+    ax = plt.axes(projection='3d')
+    ax.set_xlim3d(space_center[0] - space_size[0] * 0.5,
+                  space_center[0] + space_size[0] * 0.5)
+    ax.set_ylim3d(space_center[1] - space_size[1] * 0.5,
+                  space_center[1] + space_size[1] * 0.5)
+    ax.set_zlim3d(space_center[2] - space_size[2] * 0.5,
+                  space_center[2] + space_size[2] * 0.5)
+    pose_kpt_color = np.array(pose_kpt_color)
+    pose_kpt_color = pose_kpt_color[..., ::-1] / 255.
+
+    for kpts in pose_result:
+        # draw each point on image
+        xs, ys, zs, scores = kpts.T
+        valid = scores > kpt_score_thr
+        ax.scatter(
+            xs[valid],
+            ys[valid],
+            zs[valid],
+            marker='o',
+            color=pose_kpt_color[valid])
+
+    # convert figure to numpy array
+    fig.tight_layout()
+    fig.canvas.draw()
+    img_w, img_h = fig.canvas.get_width_height()
+    img_vis = np.frombuffer(
+        fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(img_h, img_w, -1)
+    img_vis = mmcv.rgb2bgr(img_vis)
+
+    plt.close(fig)
+
+    return img_vis
 
 
 @POSENETS.register_module()
@@ -120,8 +187,7 @@ class GraphBasedModel(DetectAndRegress):
             for img_ in img:
                 feature_maps.append(self.predict_heatmap(img_)[0])
 
-        human_candidates = self.human_detector.forward_test(
-            None, img_metas, feature_maps, **kwargs)
+        human_candidates = self.human_detector.forward_test(None, img_metas, feature_maps, **kwargs)
 
         human_poses = self.pose_regressor(
             None,
@@ -129,6 +195,7 @@ class GraphBasedModel(DetectAndRegress):
             return_loss=False,
             feature_maps=[f[:, -self.num_joints:] for f in feature_maps],
             human_candidates=human_candidates)
+        
         if self.pose_refiner is not None and self.test_with_refine:
             human_poses = self.pose_refiner.forward_test(human_poses, feature_maps, img_metas)
 
@@ -136,5 +203,63 @@ class GraphBasedModel(DetectAndRegress):
         result['pose_3d'] = human_poses.cpu().numpy()
         result['human_detection_3d'] = human_candidates.cpu().numpy()
         result['sample_id'] = [img_meta['sample_id'] for img_meta in img_metas]
+
+        # ##전체 pose visualization
+        # pose_3d = result['pose_3d']
+        # sample_id = result['sample_id']
+        # batch_size = pose_3d.shape[0]
+
+        # for i in range(batch_size):
+        #     img_meta = img_metas[i]
+        #     num_cameras = len(img_meta['camera'])
+        #     pose_3d_i = pose_3d[i]
+        #     pose_3d_i = pose_3d_i[pose_3d_i[:, 0, 3] >= 0] ##max person이 10명이라서 10, 15, 5 검출 되었으나 8명은 존재하지 않아서 삭제 
+
+        #     num_persons, num_keypoints, _ = pose_3d_i.shape
+        #     pose_3d_list = [p[..., [0, 1, 2, 4]] for p in pose_3d_i] if num_persons > 0 else []
+            
+        #     cfg = Config.fromfile('configs/_base_/datasets/panoptic_body3d.py')
+        #     dataset_info = cfg._cfg_dict['dataset_info']
+        #     dataset_info = DatasetInfo(dataset_info)
+
+        #     img_3d = imshow_multiview_keypoints_3d(
+        #         pose_3d_list,
+        #         skeleton=dataset_info.skeleton,
+        #         pose_kpt_color=dataset_info.pose_kpt_color[:num_keypoints],
+        #         pose_link_color=dataset_info.pose_link_color,
+        #         space_size=self.human_detector.match_module.cfg_3d['space_size'],
+        #         space_center=self.human_detector.match_module.cfg_3d['space_center'])
+            
+        #     mmcv.image.imwrite(img_3d,os.path.join('vis_result', 'vis_3d', f'{sample_id[i]}_3d.jpg'))
+
+        #human candidates visualization
+        # human_candidates = result['human_detection_3d']
+        # sample_id = result['sample_id']
+        # batch_size = human_candidates.shape[0]
+
+        # for i in range(batch_size):
+        #     img_meta = img_metas[i]
+        #     num_cameras = len(img_meta['camera'])
+        #     human_candidates_i = human_candidates[i]
+        #     human_candidates_i = human_candidates_i[human_candidates_i[:, 3] >= 0] ##max person이 10명이라서 10, 15, 5 검출 되었으나 8명은 존재하지 않아서 삭제 
+
+        #     num_persons, _ = human_candidates_i.shape
+        #     pose_3d_list = [p[..., [0, 1, 2, 4]] for p in human_candidates_i] if num_persons > 0 else []
+            
+        #     cfg = Config.fromfile('configs/_base_/datasets/panoptic_body3d.py')
+        #     dataset_info = cfg._cfg_dict['dataset_info']
+        #     dataset_info = DatasetInfo(dataset_info)
+
+        #     img_3d = imshow_multiview_joints_3d(
+        #         pose_3d_list,
+        #         skeleton=dataset_info.skeleton,
+        #         pose_kpt_color=dataset_info.pose_kpt_color[2],
+        #         pose_link_color=dataset_info.pose_link_color,
+        #         space_size=self.human_detector.match_module.cfg_3d['space_size'],
+        #         space_center=self.human_detector.match_module.cfg_3d['space_center'])
+            
+        #     mmcv.image.imwrite(img_3d,os.path.join('vis_result', 'vis_3d', f'{sample_id[i]}_3d_joints.jpg'))
+
+        
 
         return result
