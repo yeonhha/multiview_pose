@@ -67,7 +67,7 @@ class CenterRefinementModule(nn.Module):
         self.register_buffer(f'queries_train',
                              compute_grid(r * 2, 0, r * 2 // d))
 
-    def forward(self, feature_maps, img_metas, center_candidates, return_loss=True):
+    def forward(self, feature_maps, img_metas, neck_candidates, return_loss=True):
         """
 
         Args:
@@ -82,11 +82,11 @@ class CenterRefinementModule(nn.Module):
         """
         feature_maps = torch.stack(feature_maps, dim=1)
         if return_loss:
-            return self.forward_train(feature_maps, img_metas, center_candidates)
+            return self.forward_train(feature_maps, img_metas, neck_candidates)
         else:
-            return self.forward_test(feature_maps, img_metas, center_candidates)
+            return self.forward_test(feature_maps, img_metas, neck_candidates)
 
-    def forward_train(self, feature_maps, img_metas, center_candidates):
+    def forward_train(self, feature_maps, img_metas, neck_candidates):
         """
 
         Args:
@@ -95,32 +95,29 @@ class CenterRefinementModule(nn.Module):
             center_candidates: [num_candidates_i x 5] i=0:N-1
                 or Nxnum_candidates_ix5
         """
-        if not isinstance(center_candidates, list):
-            center_candidates_list = []
-            for center_candidate in center_candidates:
-                center_candidates_list.append(center_candidate[center_candidate[:, -1] > 0])
-            center_candidates = center_candidates_list
+        if not isinstance(neck_candidates, list):
+            neck_candidates_list = []
+            for neck_candidate in neck_candidates:
+                neck_candidates_list.append(neck_candidate[neck_candidate[:, -1] > 0])
+            neck_candidates = neck_candidates_list
         feature_maps = feature_maps.detach()
-        predicted_center_scores, center_candidates = \
-            self.inference(feature_maps, img_metas, center_candidates, True)
-        center_candidates = torch.cat(center_candidates)
+        predicted_neck_scores, neck_candidates = self.inference(feature_maps, img_metas, neck_candidates, True)
+        neck_candidates = torch.cat(neck_candidates)
 
         losses = dict()
-        weights = center_candidates[:, -1:]
+        weights = neck_candidates[:, -1:]
         weights = weights / (weights.sum() + 1e-12)
-        loss = self.loss(predicted_center_scores, center_candidates[:, -2:-1])
+        loss = self.loss(predicted_neck_scores, neck_candidates[:, -2:-1])
         loss = (loss * weights).sum()
 
         losses['loss_center'] = loss
 
-        center_candidates_for_next_stage = self.generate_samples_for_next_stage(feature_maps,
-                                                                                img_metas)
+        neck_candidates_for_next_stage = self.generate_samples_for_next_stage(feature_maps,img_metas)
 
-        return center_candidates_for_next_stage, losses
+        return neck_candidates_for_next_stage, losses
 
     def inference(self, feature_maps, img_metas, center_candidates, discard_nan):
-        multiview_features, bounding, center_candidates = \
-            self.project_layer(feature_maps, img_metas, center_candidates, discard_nan)
+        multiview_features, bounding, center_candidates = self.project_layer(feature_maps, img_metas, center_candidates, discard_nan)
         # [P_ixVxC] i in 0:N-1
         node_features, edge_indices = self.build_graph_for_samples(multiview_features)  # PxVxC, PxEx2
         bounding = torch.cat(bounding).view(-1)
@@ -161,11 +158,9 @@ class CenterRefinementModule(nn.Module):
         samples_to_query_s = [samples_to_query if len(samples_to_query) > 0
                               else self.grid_samples[:, 0] == self.grid_samples[:, 0]
                               for samples_to_query in center_candidates]
-        center_candidates = [self.grid_samples[samples_to_query]
-                             for samples_to_query in samples_to_query_s]
+        center_candidates = [self.grid_samples[samples_to_query] for samples_to_query in samples_to_query_s]
 
-        predicted_center_scores, _ \
-            = self.inference(feature_maps, img_metas, center_candidates, discard_nan=False)
+        predicted_center_scores, _  = self.inference(feature_maps, img_metas, center_candidates, discard_nan=False)
 
         heatmap_cubes = feature_maps.new_zeros(batch_size,
                                                self.grid_samples.shape[0])
